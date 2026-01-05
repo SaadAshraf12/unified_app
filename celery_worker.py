@@ -3,6 +3,11 @@ Celery Worker Configuration
 Background tasks for Email and Meeting agents
 """
 import os
+import sys
+
+# Add the current directory to Python path for module imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -37,13 +42,39 @@ celery.conf.beat_schedule = {
 }
 
 
+def get_flask_app():
+    """Create Flask app instance for Celery tasks."""
+    from flask import Flask
+    from flask_login import LoginManager
+    from models import db, User
+    from config import config
+    
+    config_name = os.getenv('FLASK_ENV', 'production')
+    
+    app = Flask(__name__)
+    app.config.from_object(config[config_name])
+    
+    db.init_app(app)
+    
+    login_manager = LoginManager()
+    login_manager.init_app(app)
+    
+    @login_manager.user_loader
+    def load_user(user_id):
+        return db.session.get(User, int(user_id))
+    
+    with app.app_context():
+        db.create_all()
+    
+    return app
+
+
 @celery.task(bind=True)
 def scan_all_users_meetings(self):
     """Scan meetings for all enabled users."""
-    from app import create_app
-    from models import db, User, MeetingAgentConfig, ActivityLog
+    from models import db, MeetingAgentConfig
     
-    app = create_app()
+    app = get_flask_app()
     with app.app_context():
         # Get all users with enabled meeting agent
         enabled_configs = MeetingAgentConfig.query.filter_by(is_enabled=True).all()
@@ -70,14 +101,13 @@ def scan_all_users_meetings(self):
 @celery.task(bind=True, max_retries=3)
 def scan_user_meetings(self, user_id):
     """Scan meetings for a specific user."""
-    from app import create_app
     from models import db, User, ActivityLog
     from agents.meeting_agent.service import MeetingAgentService
     import asyncio
     
-    app = create_app()
+    app = get_flask_app()
     with app.app_context():
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             return {'error': 'User not found'}
         
@@ -117,10 +147,9 @@ def scan_user_meetings(self, user_id):
 @celery.task(bind=True)
 def scan_all_users_emails(self):
     """Scan emails for all enabled users."""
-    from app import create_app
-    from models import db, User, EmailAgentConfig, ActivityLog
+    from models import db, EmailAgentConfig
     
-    app = create_app()
+    app = get_flask_app()
     with app.app_context():
         # Get all users with enabled email agent
         enabled_configs = EmailAgentConfig.query.filter_by(is_enabled=True).all()
@@ -147,14 +176,13 @@ def scan_all_users_emails(self):
 @celery.task(bind=True, max_retries=3)
 def scan_user_emails(self, user_id):
     """Scan emails for a specific user."""
-    from app import create_app
     from models import db, User, ActivityLog
     from agents.email_agent.service import EmailAgentService
     import asyncio
     
-    app = create_app()
+    app = get_flask_app()
     with app.app_context():
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             return {'error': 'User not found'}
         
@@ -195,14 +223,13 @@ def scan_user_emails(self, user_id):
 @celery.task(bind=True)
 def process_new_email_notification(self, user_id, email_id):
     """Process a single incoming email (triggered by webhook)."""
-    from app import create_app
     from models import db, User, ActivityLog
     from agents.email_agent.service import EmailAgentService
     import asyncio
     
-    app = create_app()
+    app = get_flask_app()
     with app.app_context():
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             return {'error': 'User not found'}
         
