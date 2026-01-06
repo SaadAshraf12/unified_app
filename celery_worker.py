@@ -45,6 +45,10 @@ celery.conf.beat_schedule = {
     },
 }
 
+# Import ATS tasks to register them with Celery
+import agents.ats_agent.tasks  # noqa: F401
+
+
 
 def get_flask_app():
     """Create Flask app instance for Celery tasks."""
