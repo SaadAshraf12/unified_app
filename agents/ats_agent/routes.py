@@ -8,7 +8,7 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from . import ats_bp
-from models import db, ATSAgentConfig, CVCandidate, ATSScanHistory
+from models import db, ATSAgentConfig, CVCandidate, ATSScanHistory, ActivityLog
 from .parser import extract_text_from_cv, parse_cv_basic_info
 from .filters import apply_hard_filters
 from .scorer import score_cv_with_openai, calculate_weighted_score
