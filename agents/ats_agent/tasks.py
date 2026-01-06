@@ -57,7 +57,7 @@ def process_ats_scan(user_id):
             access_token = get_valid_access_token(settings, db)
             if not access_token:
                 print(f"Failed to get valid access token for user {user_id}")
-                    return
+                return
 
         
         # Create scan history record
