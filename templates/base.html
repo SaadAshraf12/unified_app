@@ -731,6 +731,11 @@
                     <i class="bi bi-camera-video"></i>
                     <span>Meeting Agent</span>
                 </a>
+                <a href="{{ url_for('ats.dashboard') }}"
+                    class="nav-link {% if 'ats' in request.endpoint %}active{% endif %}">
+                    <i class="bi bi-file-earmark-person"></i>
+                    <span>ATS Scoring</span>
+                </a>
             </div>
 
             <div class="nav-section">

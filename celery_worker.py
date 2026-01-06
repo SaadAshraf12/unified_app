@@ -39,6 +39,10 @@ celery.conf.beat_schedule = {
         'task': 'celery_worker.scan_all_users_emails',
         'schedule': 5 * 60,  # 5 minutes in seconds
     },
+    'scan-ats-every-30-minutes': {
+        'task': 'ats_agent.scheduled_scan',
+        'schedule': 30 * 60,  # 30 minutes in seconds
+    },
 }
 
 

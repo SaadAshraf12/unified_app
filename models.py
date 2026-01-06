@@ -56,8 +56,10 @@ class User(UserMixin, db.Model):
     email_config = db.relationship('EmailAgentConfig', backref='user', uselist=False, cascade='all, delete-orphan')
     meeting_config = db.relationship('MeetingAgentConfig', backref='user', uselist=False, cascade='all, delete-orphan')
     bot_config = db.relationship('BotConfig', backref='user', uselist=False, cascade='all, delete-orphan')
+    ats_config = db.relationship('ATSAgentConfig', backref='user', uselist=False, cascade='all, delete-orphan')
     processed_emails = db.relationship('ProcessedEmail', backref='user', lazy='dynamic', cascade='all, delete-orphan')
     processed_meetings = db.relationship('ProcessedMeeting', backref='user', lazy='dynamic', cascade='all, delete-orphan')
+    cv_candidates = db.relationship('CVCandidate', backref='user', lazy='dynamic', cascade='all, delete-orphan')
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -316,10 +318,173 @@ class ActivityLog(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    agent_type = db.Column(db.String(20), nullable=False)  # 'email', 'meeting', 'bot'
+    agent_type = db.Column(db.String(20), nullable=False)  # 'email', 'meeting', 'bot', 'ats'
     action = db.Column(db.String(50), nullable=False)
     message = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(20), default='success')  # 'success', 'error', 'warning'
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     user = db.relationship('User', backref=db.backref('activity_logs', lazy='dynamic'))
+
+
+class ATSAgentConfig(db.Model):
+    """Configuration for ATS Scoring Agent per user."""
+    __tablename__ = 'ats_agent_configs'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True)
+    
+    # Job Details
+    job_title = db.Column(db.String(255), nullable=True)
+    job_description = db.Column(db.Text, nullable=True)
+    _required_skills = db.Column('required_skills', db.Text, default='[]')
+    
+    # Filters
+    _allowed_locations = db.Column('allowed_locations', db.Text, default='[]')
+    min_experience = db.Column(db.Integer, default=0)
+    max_experience = db.Column(db.Integer, default=99)
+    min_education_level = db.Column(db.String(50), nullable=True)  # Bachelors, Masters, etc.
+    _must_have_skills = db.Column('must_have_skills', db.Text, default='[]')
+    
+    # Scoring Weights (must sum to 1.0)
+    weight_skills = db.Column(db.Numeric(4, 2), default=0.40)
+    weight_title = db.Column(db.Numeric(4, 2), default=0.20)
+    weight_experience = db.Column(db.Numeric(4, 2), default=0.20)
+    weight_education = db.Column(db.Numeric(4, 2), default=0.10)
+    weight_keywords = db.Column(db.Numeric(4, 2), default=0.10)
+    
+    # CV Sources
+    onedrive_enabled = db.Column(db.Boolean, default=False)
+    onedrive_folder_path = db.Column(db.String(255), default='CVs')
+    google_drive_enabled = db.Column(db.Boolean, default=False)
+    google_drive_folder_id = db.Column(db.String(255), nullable=True)
+    sharepoint_enabled = db.Column(db.Boolean, default=False)
+    sharepoint_site_url = db.Column(db.String(500), nullable=True)
+    sharepoint_library = db.Column(db.String(255), nullable=True)
+    email_folder_enabled = db.Column(db.Boolean, default=False)
+    email_folder_name = db.Column(db.String(255), default='Recruitment')
+    email_inbox_enabled = db.Column(db.Boolean, default=False)
+    
+    # Output Config
+    top_n_candidates = db.Column(db.Integer, default=10)
+    min_threshold_score = db.Column(db.Integer, default=60)
+    
+    # Agent settings
+    is_enabled = db.Column(db.Boolean, default=True)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    @property
+    def required_skills(self):
+        return json.loads(self._required_skills or '[]')
+    
+    @required_skills.setter
+    def required_skills(self, value):
+        self._required_skills = json.dumps(value if isinstance(value, list) else [])
+    
+    @property
+    def allowed_locations(self):
+        return json.loads(self._allowed_locations or '[]')
+    
+    @allowed_locations.setter
+    def allowed_locations(self, value):
+        self._allowed_locations = json.dumps(value if isinstance(value, list) else [])
+    
+    @property
+    def must_have_skills(self):
+        return json.loads(self._must_have_skills or '[]')
+    
+    @must_have_skills.setter
+    def must_have_skills(self, value):
+        self._must_have_skills = json.dumps(value if isinstance(value, list) else [])
+
+
+class CVCandidate(db.Model):
+    """CV candidates and their scoring results."""
+    __tablename__ = 'cv_candidates'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    job_id = db.Column(db.Integer, nullable=True)  # For future multi-job support
+    
+    # Basic Info (parsed from CV)
+    full_name = db.Column(db.String(255), nullable=True)
+    email = db.Column(db.String(255), nullable=True)
+    phone = db.Column(db.String(50), nullable=True)
+    location = db.Column(db.String(100), nullable=True)
+    linkedin_url = db.Column(db.String(500), nullable=True)
+    
+    # Extracted Data
+    years_of_experience = db.Column(db.Numeric(4, 1), nullable=True)
+    _skills = db.Column('skills', db.Text, default='[]')
+    education_level = db.Column(db.String(50), nullable=True)
+    current_job_title = db.Column(db.String(255), nullable=True)
+    
+    # CV Data
+    cv_text = db.Column(db.Text, nullable=True)  # Full extracted text
+    cv_file_path = db.Column(db.String(500), nullable=True)  # Stored file location
+    cv_source = db.Column(db.String(50), nullable=True)  # 'google_drive', 'sharepoint', 'outlook', 'email'
+    source_file_id = db.Column(db.String(255), nullable=True)  # Original file ID from source
+    source_file_name = db.Column(db.String(255), nullable=True)
+    
+    # Scoring Results
+    status = db.Column(db.String(50), default='pending')  # 'pending', 'scored', 'filtered_out', 'rejected'
+    skills_score = db.Column(db.Integer, nullable=True)
+    skills_reasoning = db.Column(db.Text, nullable=True)
+    title_score = db.Column(db.Integer, nullable=True)
+    title_reasoning = db.Column(db.Text, nullable=True)
+    experience_score = db.Column(db.Integer, nullable=True)
+    experience_reasoning = db.Column(db.Text, nullable=True)
+    education_score = db.Column(db.Integer, nullable=True)
+    education_reasoning = db.Column(db.Text, nullable=True)
+    keywords_score = db.Column(db.Integer, nullable=True)
+    keywords_reasoning = db.Column(db.Text, nullable=True)
+    final_weighted_score = db.Column(db.Numeric(5, 2), nullable=True)
+    overall_assessment = db.Column(db.Text, nullable=True)
+    _red_flags = db.Column('red_flags', db.Text, default='[]')
+    
+    # Metadata
+    processed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'source_file_id', name='unique_user_cv'),
+    )
+    
+    @property
+    def skills(self):
+        return json.loads(self._skills or '[]')
+    
+    @skills.setter
+    def skills(self, value):
+        self._skills = json.dumps(value if isinstance(value, list) else [])
+    
+    @property
+    def red_flags(self):
+        return json.loads(self._red_flags or '[]')
+    
+    @red_flags.setter
+    def red_flags(self, value):
+        self._red_flags = json.dumps(value if isinstance(value, list) else [])
+
+
+class ATSScanHistory(db.Model):
+    """Track ATS scan history and statistics."""
+    __tablename__ = 'ats_scan_history'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    
+    total_cvs_found = db.Column(db.Integer, default=0)
+    cvs_processed = db.Column(db.Integer, default=0)
+    cvs_filtered_out = db.Column(db.Integer, default=0)
+    cvs_scored = db.Column(db.Integer, default=0)
+    top_candidates_count = db.Column(db.Integer, default=0)
+    
+    scan_started_at = db.Column(db.DateTime, default=datetime.utcnow)
+    scan_completed_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(50), default='running')  # 'running', 'completed', 'failed'
+    error_message = db.Column(db.Text, nullable=True)
+    
+    user = db.relationship('User', backref=db.backref('ats_scan_history', lazy='dynamic'))

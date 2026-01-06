@@ -33,10 +33,12 @@ def create_app(config_name=None):
     from auth.routes import auth_bp
     from agents.email_agent.routes import email_bp
     from agents.meeting_agent.routes import meeting_bp
+    from agents.ats_agent import ats_bp
     
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(email_bp, url_prefix='/email')
     app.register_blueprint(meeting_bp, url_prefix='/meeting')
+    app.register_blueprint(ats_bp, url_prefix='/ats')
     
     # Main routes
     @app.route('/')
