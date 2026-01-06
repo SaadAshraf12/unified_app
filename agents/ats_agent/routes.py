@@ -151,7 +151,7 @@ def run_ajax():
         
         # Trigger background Celery task instead of running synchronously
         from agents.ats_agent.tasks import process_ats_scan
-        process_ats_scan(current_user.id)  # Run in background
+        process_ats_scan.delay(current_user.id)  # Run in background via Celery
         
         # Log activity
         log = ActivityLog(
