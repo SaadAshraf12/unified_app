@@ -132,7 +132,7 @@ def run():
 @ats_bp.route('/run_ajax', methods=['POST'])
 @login_required
 def run_ajax():
-    """AJAX endpoint to run CV scan."""
+    """AJAX endpoint to trigger CV scan (runs in background via Celery)."""
     try:
         # Get config
         config = ATSAgentConfig.query.filter_by(user_id=current_user.id).first()
@@ -145,201 +145,35 @@ def run_ajax():
         if not settings or not settings.openai_api_key:
             return jsonify({'success': False, 'error': 'OpenAI API key not configured'})
         
-        # Create scan history record
-        scan = ATSScanHistory(user_id=current_user.id, status='running')
-        db.session.add(scan)
-        db.session.commit()
+        # Check if MS token exists
+        if not settings.ms_access_token:
+            return jsonify({'success': False, 'error': 'Microsoft account not connected'})
         
-        # This is a simplified version - in production, use Celery for background processing
-        cv_files = []
+        # Trigger background Celery task instead of running synchronously
+        from agents.ats_agent.tasks import process_ats_scan
+        process_ats_scan(current_user.id)  # Run in background
         
-        print(f"DEBUG: Starting CV scan...")
-        print(f"DEBUG: OneDrive enabled: {config.onedrive_enabled}")
-        print(f"DEBUG: Email inbox enabled: {config.email_inbox_enabled}")
-        print(f"DEBUG: Email folder enabled: {config.email_folder_enabled}")
-        print(f"DEBUG: SharePoint enabled: {config.sharepoint_enabled}")
-        print(f"DEBUG: MS Access token present: {bool(settings.ms_access_token)}")
-        
-        # Ensure we have a valid access token (refresh if needed)
-        if settings.ms_access_token:
-            from utils.ms_auth import get_valid_access_token
-            access_token = get_valid_access_token(settings, db)
-            if not access_token:
-                return jsonify({'success': False, 'error': 'Microsoft access token expired. Please re-authenticate.'})
-        else:
-            access_token = None
-        
-        
-        # Scan OneDrive
-        if config.onedrive_enabled and access_token:
-            print(f"DEBUG: Scanning OneDrive folder: {config.onedrive_folder_path}")
-            from .scanner import scan_onedrive_folder
-            onedrive_cvs = scan_onedrive_folder(access_token, config.onedrive_folder_path)
-            print(f"DEBUG: Found {len(onedrive_cvs)} CVs from OneDrive")
-            cv_files.extend(onedrive_cvs)
-        
-        # Scan Email Inbox
-        if config.email_inbox_enabled and access_token:
-            print(f"DEBUG: Scanning email inbox...")
-            from .scanner import scan_email_attachments
-            inbox_cvs = scan_email_attachments(access_token, folder_name=None)
-            print(f"DEBUG: Found {len(inbox_cvs)} CVs from inbox")
-            cv_files.extend(inbox_cvs)
-        
-        # Scan Email Folder
-        if config.email_folder_enabled and access_token:
-            print(f"DEBUG: Scanning email folder: {config.email_folder_name}")
-            from .scanner import scan_email_attachments
-            folder_cvs = scan_email_attachments(access_token, config.email_folder_name)
-            print(f"DEBUG: Found {len(folder_cvs)} CVs from folder")
-            cv_files.extend(folder_cvs)
-        
-        # Scan SharePoint
-        if config.sharepoint_enabled and config.sharepoint_site_url and access_token:
-            print(f"DEBUG: Scanning SharePoint...")
-            sp_cvs = scan_sharepoint_library(
-                access_token,
-                config.sharepoint_site_url,
-                config.sharepoint_library
-            )
-            print(f"DEBUG: Found {len(sp_cvs)} CVs from SharePoint")
-            cv_files.extend(sp_cvs)
-        
-        print(f"DEBUG: Total CVs found: {len(cv_files)}")
-        
-        scan.total_cvs_found = len(cv_files)
-        
-        processed = 0
-        scored = 0
-        filtered = 0
-        
-        # Process each CV
-        for cv_file in cv_files:
-            # Skip if already processed
-            existing = CVCandidate.query.filter_by(
-                user_id=current_user.id,
-                source_file_id=cv_file['source_id']
-            ).first()
-            if existing:
-                continue
-            
-            # Download/save file
-            filename = secure_filename(cv_file['filename'])
-            filepath = os.path.join(UPLOAD_FOLDER, f"{current_user.id}_{datetime.now().timestamp()}_{filename}")
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            
-            if cv_file.get('download_url'):
-                download_file(cv_file['download_url'], filepath, settings.ms_access_token)
-            elif cv_file.get('content'):
-                save_base64_file(cv_file['content'], filepath)
-            
-            # Parse CV
-            cv_text = extract_text_from_cv(filepath)
-            if not cv_text:
-                continue
-            
-            basic_info = parse_cv_basic_info(cv_text)
-            
-            # Create candidate record
-            candidate = CVCandidate(
-                user_id=current_user.id,
-                cv_text=cv_text,
-                cv_file_path=filepath,
-                cv_source=cv_file['source'],
-                source_file_id=cv_file['source_id'],
-                source_file_name=cv_file['filename'],
-                full_name=basic_info.get('name'),
-                email=basic_info.get('email'),
-                phone=basic_info.get('phone'),
-                linkedin_url=basic_info.get('linkedin_url')
-            )
-            
-            # Apply hard filters
-            filter_config = {
-                'allowed_locations': config.allowed_locations,
-                'min_experience': config.min_experience,
-                'max_experience': config.max_experience,
-                'must_have_skills': config.must_have_skills
-            }
-            
-            passed, reasons = apply_hard_filters({'cv_text': cv_text}, filter_config)
-            
-            if not passed:
-                candidate.status = 'filtered_out'
-                filtered += 1
-            else:
-                # Score with OpenAI
-                job_config = {
-                    'job_title': config.job_title,
-                    'job_description': config.job_description,
-                    'required_skills': config.required_skills
-                }
-                
-                score_result = score_cv_with_openai(
-                    {'cv_text': cv_text},
-                    job_config,
-                    settings.openai_api_key
-                )
-                
-                if score_result:
-                    # Update candidate with scores
-                    candidate.skills_score = score_result.get('skills_score')
-                    candidate.skills_reasoning = score_result.get('skills_reasoning')
-                    candidate.title_score = score_result.get('title_score')
-                    candidate.title_reasoning = score_result.get('title_reasoning')
-                    candidate.experience_score = score_result.get('experience_score')
-                    candidate.experience_reasoning = score_result.get('experience_reasoning')
-                    candidate.education_score = score_result.get('education_score')
-                    candidate.education_reasoning = score_result.get('education_reasoning')
-                    candidate.keywords_score = score_result.get('keywords_score')
-                    candidate.keywords_reasoning = score_result.get('keywords_reasoning')
-                    candidate.overall_assessment = score_result.get('overall_assessment')
-                    candidate.red_flags = score_result.get('red_flags', [])
-                    
-                    # Calculate weighted score
-                    weights = {
-                        'weight_skills': config.weight_skills,
-                        'weight_title': config.weight_title,
-                        'weight_experience': config.weight_experience,
-                        'weight_education': config.weight_education,
-                        'weight_keywords': config.weight_keywords
-                    }
-                    candidate.final_weighted_score = calculate_weighted_score(score_result, weights)
-                    
-                    # Update extracted data
-                    candidate.years_of_experience = score_result.get('years_of_experience')
-                    candidate.location = score_result.get('location')
-                    candidate.current_job_title = score_result.get('current_title')
-                    candidate.skills = score_result.get('extracted_skills', [])
-                    
-                    candidate.status = 'scored'
-                    candidate.processed_at = datetime.utcnow()
-                    scored += 1
-            
-            db.session.add(candidate)
-            processed += 1
-        
-        # Update scan history
-        scan.cvs_processed = processed
-        scan.cvs_scored = scored
-        scan.cvs_filtered_out = filtered
-        scan.status = 'completed'
-        scan.scan_completed_at = datetime.utcnow()
-        
+        # Log activity
+        log = ActivityLog(
+            user_id=current_user.id,
+            agent_type='ats',
+            action='scan_triggered',
+            message='ATS scan started (running in background)',
+            status='success'
+        )
+        db.session.add(log)
         db.session.commit()
         
         return jsonify({
             'success': True,
-            'cvs_found': scan.total_cvs_found,
-            'processed': processed,
-            'scored': scored,
-            'filtered': filtered
+            'message': 'Scan started! Refresh the page in a few moments to see results.',
+            'info': 'The scan is running in the background and may take 1-2 minutes depending on the number of CVs found.'
         })
         
     except Exception as e:
-        scan.status = 'failed'
-        scan.error_message = str(e)
-        db.session.commit()
+        print(f"Error triggering ATS scan: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)})
 
 
