@@ -160,35 +160,45 @@ def run_ajax():
         print(f"DEBUG: SharePoint enabled: {config.sharepoint_enabled}")
         print(f"DEBUG: MS Access token present: {bool(settings.ms_access_token)}")
         
+        # Ensure we have a valid access token (refresh if needed)
+        if settings.ms_access_token:
+            from utils.ms_auth import get_valid_access_token
+            access_token = get_valid_access_token(settings, db)
+            if not access_token:
+                return jsonify({'success': False, 'error': 'Microsoft access token expired. Please re-authenticate.'})
+        else:
+            access_token = None
+        
+        
         # Scan OneDrive
-        if config.onedrive_enabled and settings.ms_access_token:
+        if config.onedrive_enabled and access_token:
             print(f"DEBUG: Scanning OneDrive folder: {config.onedrive_folder_path}")
             from .scanner import scan_onedrive_folder
-            onedrive_cvs = scan_onedrive_folder(settings.ms_access_token, config.onedrive_folder_path)
+            onedrive_cvs = scan_onedrive_folder(access_token, config.onedrive_folder_path)
             print(f"DEBUG: Found {len(onedrive_cvs)} CVs from OneDrive")
             cv_files.extend(onedrive_cvs)
         
         # Scan Email Inbox
-        if config.email_inbox_enabled and settings.ms_access_token:
+        if config.email_inbox_enabled and access_token:
             print(f"DEBUG: Scanning email inbox...")
             from .scanner import scan_email_attachments
-            inbox_cvs = scan_email_attachments(settings.ms_access_token, folder_name=None)
+            inbox_cvs = scan_email_attachments(access_token, folder_name=None)
             print(f"DEBUG: Found {len(inbox_cvs)} CVs from inbox")
             cv_files.extend(inbox_cvs)
         
         # Scan Email Folder
-        if config.email_folder_enabled and settings.ms_access_token:
+        if config.email_folder_enabled and access_token:
             print(f"DEBUG: Scanning email folder: {config.email_folder_name}")
             from .scanner import scan_email_attachments
-            folder_cvs = scan_email_attachments(settings.ms_access_token, config.email_folder_name)
+            folder_cvs = scan_email_attachments(access_token, config.email_folder_name)
             print(f"DEBUG: Found {len(folder_cvs)} CVs from folder")
             cv_files.extend(folder_cvs)
         
         # Scan SharePoint
-        if config.sharepoint_enabled and config.sharepoint_site_url and settings.ms_access_token:
+        if config.sharepoint_enabled and config.sharepoint_site_url and access_token:
             print(f"DEBUG: Scanning SharePoint...")
             sp_cvs = scan_sharepoint_library(
-                settings.ms_access_token,
+                access_token,
                 config.sharepoint_site_url,
                 config.sharepoint_library
             )

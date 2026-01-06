@@ -45,6 +45,15 @@ def process_ats_scan(user_id):
     if not settings or not settings.openai_api_key:
         return
     
+    # Get valid access token (refresh if needed)
+    access_token = None
+    if settings.ms_access_token:
+        from utils.ms_auth import get_valid_access_token
+        access_token = get_valid_access_token(settings, db)
+        if not access_token:
+            print(f"Failed to get valid access token for user {user_id}")
+            return
+    
     # Create scan history record
     scan = ATSScanHistory(user_id=user_id, status='running')
     db.session.add(scan)
@@ -54,24 +63,24 @@ def process_ats_scan(user_id):
         cv_files = []
         
         # Scan OneDrive
-        if config.onedrive_enabled and settings.ms_access_token:
-            onedrive_cvs = scan_onedrive_folder(settings.ms_access_token, config.onedrive_folder_path)
+        if config.onedrive_enabled and access_token:
+            onedrive_cvs = scan_onedrive_folder(access_token, config.onedrive_folder_path)
             cv_files.extend(onedrive_cvs)
         
         # Scan Email Inbox
-        if config.email_inbox_enabled and settings.ms_access_token:
-            inbox_cvs = scan_email_attachments(settings.ms_access_token, folder_name=None)
+        if config.email_inbox_enabled and access_token:
+            inbox_cvs = scan_email_attachments(access_token, folder_name=None)
             cv_files.extend(inbox_cvs)
         
         # Scan Email Folder
-        if config.email_folder_enabled and settings.ms_access_token:
-            folder_cvs = scan_email_attachments(settings.ms_access_token, config.email_folder_name)
+        if config.email_folder_enabled and access_token:
+            folder_cvs = scan_email_attachments(access_token, config.email_folder_name)
             cv_files.extend(folder_cvs)
         
         # Scan SharePoint
-        if config.sharepoint_enabled and config.sharepoint_site_url and settings.ms_access_token:
+        if config.sharepoint_enabled and config.sharepoint_site_url and access_token:
             sp_cvs = scan_sharepoint_library(
-                settings.ms_access_token,
+                access_token,
                 config.sharepoint_site_url,
                 config.sharepoint_library
             )
@@ -99,7 +108,7 @@ def process_ats_scan(user_id):
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             
             if cv_file.get('download_url'):
-                download_file(cv_file['download_url'], filepath, settings.ms_access_token)
+                download_file(cv_file['download_url'], filepath, access_token)
             elif cv_file.get('content'):
                 save_base64_file(cv_file['content'], filepath)
             

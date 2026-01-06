@@ -425,7 +425,7 @@ class CVCandidate(db.Model):
     cv_text = db.Column(db.Text, nullable=True)  # Full extracted text
     cv_file_path = db.Column(db.String(500), nullable=True)  # Stored file location
     cv_source = db.Column(db.String(50), nullable=True)  # 'google_drive', 'sharepoint', 'outlook', 'email'
-    source_file_id = db.Column(db.String(255), nullable=True)  # Original file ID from source
+    source_file_id = db.Column(db.String(500), nullable=True)  # Original file ID from source (Microsoft Graph IDs can be 380+ chars)
     source_file_name = db.Column(db.String(255), nullable=True)
     
     # Scoring Results
