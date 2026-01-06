@@ -125,6 +125,18 @@ def process_ats_scan(user_id):
                 
                 basic_info = parse_cv_basic_info(cv_text)
                 
+                # Skip if candidate with same email already exists (deduplication)
+                candidate_email = basic_info.get('email')
+                if candidate_email:
+                    existing_by_email = CVCandidate.query.filter_by(
+                        user_id=user_id,
+                        email=candidate_email
+                    ).first()
+                    if existing_by_email:
+                        print(f"Skipping duplicate candidate: {candidate_email}")
+                        continue
+
+                
                 # Create candidate record
                 candidate = CVCandidate(
                     user_id=user_id,
