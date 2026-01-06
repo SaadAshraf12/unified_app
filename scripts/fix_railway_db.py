@@ -13,7 +13,10 @@ from models import db
 
 def fix_column_sizes():
     """Fix column sizes for existing tables."""
-    app = create_app()
+    # Force production config to use PostgreSQL
+    os.environ['FLASK_ENV'] = 'production'
+    
+    app = create_app('production')
     
     with app.app_context():
         print("Starting column size fixes...")
