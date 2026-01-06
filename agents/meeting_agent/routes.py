@@ -175,7 +175,7 @@ def run():
 @meeting_bp.route('/run-ajax', methods=['POST'])
 @login_required
 def run_ajax():
-    """Run meeting scan via AJAX."""
+    """Run meeting scan via AJAX (triggers background Celery task)."""
     # Check configuration
     if not current_user.settings or not current_user.settings.clickup_api_key:
         return jsonify({'success': False, 'error': 'ClickUp API key not configured'})
@@ -187,26 +187,30 @@ def run_ajax():
         return jsonify({'success': False, 'error': 'Microsoft account not connected'})
     
     try:
-        from agents.meeting_agent.service import MeetingAgentService
-        
-        service = MeetingAgentService(current_user)
-        result = asyncio.run(service.process_meetings())
+        # Trigger background Celery task instead of running synchronously
+        from celery_worker import scan_user_meetings
+        scan_user_meetings.delay(current_user.id)
         
         # Log activity
         log = ActivityLog(
             user_id=current_user.id,
             agent_type='meeting',
-            action='scan',
-            message=f"Scanned {result['meetings_checked']} meetings, created {result['tasks_created']} tasks",
-            status='success' if result['success'] else 'error'
+            action='scan_triggered',
+            message='Meeting scan started (running in background)',
+            status='success'
         )
         db.session.add(log)
         db.session.commit()
         
-        return jsonify(result)
+        return jsonify({
+            'success': True,
+            'message': 'Meeting scan started! Refresh the page in a few moments to see results.',
+            'info': 'The scan is running in the background and may take 1-2 minutes.'
+        })
         
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
 
 
 @meeting_bp.route('/history')

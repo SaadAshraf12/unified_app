@@ -55,7 +55,16 @@ class MeetingAgentService:
             return result
         
         try:
-            headers = {"Authorization": f"Bearer {self.ms_access_token}"}
+            # Refresh access token if needed
+            from utils.ms_auth import get_valid_access_token
+            access_token = get_valid_access_token(self.settings, db)
+            if not access_token:
+                result['error'] = 'Microsoft access token expired. Please re-authenticate.'
+                return result
+            
+            # Use the refreshed token
+            self.ms_access_token = access_token
+            headers = {"Authorization": f"Bearer {access_token}"}
             
             # Get ClickUp data
             self.logs.append("--- FETCHING CLICKUP DATA ---")
@@ -459,6 +468,8 @@ class MeetingAgentService:
             self.logs.append("⚠️ ClickUp doc not configured for standup summaries")
             return False
         
+        self.logs.append(f"📝 Writing to ClickUp Doc: Space={self.config.target_space_id}, Doc='{self.config.target_doc_name}'")
+        
         headers = {
             "Authorization": self.clickup_api_key,
             "Content-Type": "application/json"
@@ -468,63 +479,84 @@ class MeetingAgentService:
             # Get workspace ID
             resp = requests.get(f"{CLICKUP_API}/team", headers=headers)
             if resp.status_code != 200:
+                self.logs.append(f"❌ Failed to get workspace: {resp.status_code}")
                 return False
             
             teams = resp.json().get("teams", [])
             if not teams:
+                self.logs.append("❌ No workspaces found")
                 return False
             
             workspace_id = teams[0]["id"]
+            self.logs.append(f"✓ Workspace ID: {workspace_id}")
             
             # Search for docs in space
             docs_url = f"{CLICKUP_API_V3}/workspaces/{workspace_id}/docs"
             params = {"parent_id": self.config.target_space_id, "parent_type": 4}
             
+            self.logs.append(f"📂 Searching docs in space {self.config.target_space_id}...")
             resp = requests.get(docs_url, headers=headers, params=params)
             if resp.status_code != 200:
+                self.logs.append(f"❌ Failed to list docs: {resp.status_code} - {resp.text[:200]}")
                 return False
             
             docs = resp.json().get("docs", [])
+            self.logs.append(f"✓ Found {len(docs)} docs in space")
             
             # Find target doc
             target_doc = None
             for doc in docs:
-                if doc.get("name", "").lower() == self.config.target_doc_name.lower():
+                doc_name = doc.get("name", "")
+                self.logs.append(f"   - Doc: '{doc_name}'")
+                if doc_name.lower() == self.config.target_doc_name.lower():
                     target_doc = doc
                     break
             
             if not target_doc:
-                self.logs.append(f"❌ Doc '{self.config.target_doc_name}' not found")
+                self.logs.append(f"❌ Doc '{self.config.target_doc_name}' not found in space")
                 return False
             
             doc_id = target_doc['id']
+            self.logs.append(f"✓ Found target doc: ID={doc_id}")
             
             # Get page ID
             pages_url = f"{CLICKUP_API_V3}/workspaces/{workspace_id}/docs/{doc_id}/pages"
             resp = requests.get(pages_url, headers=headers)
             if resp.status_code != 200:
+                self.logs.append(f"❌ Failed to get pages: {resp.status_code}")
                 return False
             
-            pages = resp.json() if isinstance(resp.json(), list) else resp.json().get('pages', [])
+            pages_data = resp.json()
+            pages = pages_data if isinstance(pages_data, list) else pages_data.get('pages', [])
             if not pages:
+                self.logs.append("❌ Doc has no pages")
                 return False
             
             page_id = pages[0].get('id')
+            self.logs.append(f"✓ First page ID: {page_id}")
             
             # Update page content
             update_url = f"{CLICKUP_API_V3}/workspaces/{workspace_id}/docs/{doc_id}/pages/{page_id}"
             payload = {
-                "content": f"\n{summary_text}",
+                "content": f"\n\n---\n\n{summary_text}",
                 "content_edit_mode": "append",
                 "content_format": "text/md"
             }
             
+            self.logs.append(f"📤 Appending summary to page...")
             resp = requests.put(update_url, headers=headers, json=payload)
-            return resp.status_code in [200, 204]
+            
+            if resp.status_code in [200, 204]:
+                self.logs.append("✅ Summary successfully written to ClickUp Doc!")
+                return True
+            else:
+                self.logs.append(f"❌ Failed to update doc: {resp.status_code} - {resp.text[:300]}")
+                return False
             
         except Exception as e:
             self.logs.append(f"❌ ClickUp Doc Error: {e}")
             return False
+
     
     def _create_clickup_task(self, task_data, meeting_subject, graph_headers, start_time=None, end_time=None):
         """Create a ClickUp task."""
