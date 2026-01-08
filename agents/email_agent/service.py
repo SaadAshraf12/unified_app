@@ -54,9 +54,19 @@ class EmailAgentService:
             return result
         
         try:
+            # Refresh access token if needed
+            from utils.ms_auth import get_valid_access_token
+            access_token = get_valid_access_token(self.settings, db)
+            if not access_token:
+                result['error'] = 'Microsoft access token expired. Please re-authenticate.'
+                return result
+            
+            # Update the token for this session
+            self.ms_access_token = access_token
+            
             async with httpx.AsyncClient(timeout=30.0) as client:
                 # Get current user email
-                headers = {"Authorization": f"Bearer {self.ms_access_token}"}
+                headers = {"Authorization": f"Bearer {access_token}"}
                 my_email = await self._get_current_user_email(client, headers)
                 self.logs.append(f"👤 User: {my_email}")
                 
