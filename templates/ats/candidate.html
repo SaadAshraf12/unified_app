@@ -114,12 +114,22 @@
         {% endif %}
 
         <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">CV Content</h5>
-            </div>
-            <div class="card-body">
-                <pre
-                    style="white-space: pre-wrap; font-size: 0.9rem; color: #ffffff;">{{ candidate.cv_text or 'CV text not available' }}</pre>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">CV Document</h5>
+                {% if candidate.cv_file_path %}
+                <div>
+                    <a href="{{ url_for('ats.view_cv', candidate_id=candidate.id) }}" target="_blank"
+                        class="btn btn-sm btn-primary">
+                        <i class="bi bi-eye"></i> View PDF
+                    </a>
+                    <a href="{{ url_for('ats.download_cv', candidate_id=candidate.id) }}"
+                        class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-download"></i> Download
+                    </a>
+                </div>
+                {% else %}
+                <span class="text-muted">File not available</span>
+                {% endif %}
             </div>
         </div>
     </div>

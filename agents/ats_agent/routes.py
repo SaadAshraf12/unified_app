@@ -3,7 +3,7 @@ ATS Agent Routes - Flask endpoints for dashboard, config, and scanning
 """
 import os
 from datetime import datetime
-from flask import render_template, request, redirect, url_for, flash, jsonify
+from flask import render_template, request, redirect, url_for, flash, jsonify, send_file, abort
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
@@ -203,3 +203,57 @@ def history():
         .order_by(ATSScanHistory.scan_started_at.desc()).all()
     
     return render_template('ats/history.html', scans=scans)
+
+
+@ats_bp.route('/candidate/<int:candidate_id>/view-cv')
+@login_required
+def view_cv(candidate_id):
+    """View the original CV file (opens in browser)."""
+    candidate = CVCandidate.query.get_or_404(candidate_id)
+    
+    # Security check - ensure user owns this candidate
+    if candidate.user_id != current_user.id:
+        abort(403)
+    
+    if not candidate.cv_file_path or not os.path.exists(candidate.cv_file_path):
+        flash('CV file not found', 'error')
+        return redirect(url_for('ats.candidate', candidate_id=candidate_id))
+    
+    # Determine mimetype based on extension
+    ext = candidate.cv_file_path.rsplit('.', 1)[-1].lower()
+    mimetypes = {
+        'pdf': 'application/pdf',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'doc': 'application/msword'
+    }
+    mimetype = mimetypes.get(ext, 'application/octet-stream')
+    
+    return send_file(
+        candidate.cv_file_path,
+        mimetype=mimetype,
+        as_attachment=False  # Display in browser
+    )
+
+
+@ats_bp.route('/candidate/<int:candidate_id>/download-cv')
+@login_required
+def download_cv(candidate_id):
+    """Download the original CV file."""
+    candidate = CVCandidate.query.get_or_404(candidate_id)
+    
+    # Security check
+    if candidate.user_id != current_user.id:
+        abort(403)
+    
+    if not candidate.cv_file_path or not os.path.exists(candidate.cv_file_path):
+        flash('CV file not found', 'error')
+        return redirect(url_for('ats.candidate', candidate_id=candidate_id))
+    
+    # Get original filename or create one
+    download_name = candidate.source_file_name or f"CV_{candidate.full_name or candidate_id}.pdf"
+    
+    return send_file(
+        candidate.cv_file_path,
+        as_attachment=True,
+        download_name=download_name
+    )
