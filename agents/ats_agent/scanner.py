@@ -182,13 +182,39 @@ def scan_email_attachments(access_token: str, folder_name: Optional[str] = None,
             folders = response.json().get('value', [])
             
             folder_id = None
+            available_folders = []
+            
+            # First check top-level folders
             for folder in folders:
-                if folder.get('displayName', '').lower() == folder_name.lower():
+                folder_display = folder.get('displayName', '')
+                available_folders.append(folder_display)
+                if folder_display.lower() == folder_name.lower():
                     folder_id = folder['id']
                     break
             
+            # If not found, check subfolders (child folders of Inbox and other main folders)
             if not folder_id:
-                print(f"Folder '{folder_name}' not found")
+                for folder in folders:
+                    parent_id = folder['id']
+                    child_url = f'https://graph.microsoft.com/v1.0/me/mailFolders/{parent_id}/childFolders'
+                    try:
+                        child_resp = requests.get(child_url, headers=headers)
+                        if child_resp.status_code == 200:
+                            child_folders = child_resp.json().get('value', [])
+                            for child in child_folders:
+                                child_display = child.get('displayName', '')
+                                available_folders.append(f"  → {folder.get('displayName')}/{child_display}")
+                                if child_display.lower() == folder_name.lower():
+                                    folder_id = child['id']
+                                    print(f"Found folder '{folder_name}' as subfolder of '{folder.get('displayName')}'")
+                                    break
+                    except:
+                        pass
+                    if folder_id:
+                        break
+            
+            if not folder_id:
+                print(f"Folder '{folder_name}' not found. Available folders: {available_folders}")
                 return []
             
             # Get newest emails first (fetch more to account for those without attachments)
