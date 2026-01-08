@@ -217,7 +217,7 @@ def view_cv(candidate_id):
     
     if not candidate.cv_file_path or not os.path.exists(candidate.cv_file_path):
         flash('CV file not found', 'error')
-        return redirect(url_for('ats.candidate', candidate_id=candidate_id))
+        return redirect(url_for('ats.candidate_detail', candidate_id=candidate_id))
     
     # Determine mimetype based on extension
     ext = candidate.cv_file_path.rsplit('.', 1)[-1].lower()
@@ -247,7 +247,7 @@ def download_cv(candidate_id):
     
     if not candidate.cv_file_path or not os.path.exists(candidate.cv_file_path):
         flash('CV file not found', 'error')
-        return redirect(url_for('ats.candidate', candidate_id=candidate_id))
+        return redirect(url_for('ats.candidate_detail', candidate_id=candidate_id))
     
     # Get original filename or create one
     download_name = candidate.source_file_name or f"CV_{candidate.full_name or candidate_id}.pdf"
