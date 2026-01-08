@@ -243,13 +243,17 @@ def test_clickup():
 
 # Microsoft OAuth Routes
 GRAPH_SCOPES = [
+    "offline_access",  # REQUIRED for refresh tokens to work!
     "User.Read",
     "Mail.Read", 
+    "Mail.ReadWrite",  # For reading email attachments
     "OnlineMeetings.Read",
     "OnlineMeetingTranscript.Read.All",
     "Calendars.Read",
     "Chat.Read",
-    "Mail.Send"
+    "Mail.Send",
+    "Files.Read.All",  # For OneDrive/SharePoint CV access
+    "Sites.Read.All"   # For SharePoint access
 ]
 
 

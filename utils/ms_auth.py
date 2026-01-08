@@ -40,18 +40,21 @@ def refresh_access_token(user_settings, db):
     try:
         app_msal = get_msal_app(user_settings)
         
-        # Attempt to refresh the token
+        # Attempt to refresh the token - must use same scopes as initial auth
         result = app_msal.acquire_token_by_refresh_token(
             user_settings.ms_refresh_token,
             scopes=[
+                "offline_access",  # REQUIRED for refresh tokens!
                 "User.Read",
                 "Mail.Read",
+                "Mail.ReadWrite",
                 "OnlineMeetings.Read",
                 "OnlineMeetingTranscript.Read.All",
                 "Calendars.Read",
+                "Chat.Read",
+                "Mail.Send",
                 "Files.Read.All",
-                "Sites.Read.All",
-                "Mail.Send"
+                "Sites.Read.All"
             ]
         )
         
