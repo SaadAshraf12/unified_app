@@ -214,52 +214,82 @@ def _fetch_cv_from_source(candidate, access_token):
     source = candidate.cv_source
     source_id = candidate.source_file_id
     
+    print(f"[CV Fetch] Source: {source}, Source ID: {source_id[:50] if source_id else None}...")
+    
     if not source_id or not access_token:
+        print(f"[CV Fetch] Missing source_id or access_token")
         return None, None
     
     headers = {'Authorization': f'Bearer {access_token}'}
     
     try:
         if source in ['email_inbox', 'email_folder']:
-            # Source ID format: message_id_attachment_id
-            parts = source_id.rsplit('_', 1)
-            if len(parts) != 2:
-                return None, None
-            message_id, attachment_id = parts
+            # Source ID format: message_id_attachment_id (both are long AAMk... strings)
+            # The attachment ID starts with "AAMk" so we split at the second occurrence
+            if '_AAMk' in source_id:
+                idx = source_id.find('_AAMk')
+                message_id = source_id[:idx]
+                attachment_id = source_id[idx+1:]  # Skip the underscore
+            else:
+                # Fallback: split on last underscore
+                parts = source_id.rsplit('_', 1)
+                if len(parts) != 2:
+                    print(f"[CV Fetch] Cannot parse email source_id")
+                    return None, None
+                message_id, attachment_id = parts
+            
+            print(f"[CV Fetch] Email - Message ID: {message_id[:30]}..., Attachment ID: {attachment_id[:30]}...")
             
             # Fetch attachment from Graph API
             url = f"https://graph.microsoft.com/v1.0/me/messages/{message_id}/attachments/{attachment_id}"
             response = requests.get(url, headers=headers)
+            
+            print(f"[CV Fetch] Response: {response.status_code}")
             
             if response.status_code == 200:
                 data = response.json()
                 content_bytes = data.get('contentBytes')
                 if content_bytes:
                     return BytesIO(base64.b64decode(content_bytes)), data.get('name')
+            else:
+                print(f"[CV Fetch] Error: {response.text[:200]}")
         
         elif source == 'onedrive':
-            # Source ID is the item ID
             url = f"https://graph.microsoft.com/v1.0/me/drive/items/{source_id}/content"
+            print(f"[CV Fetch] OneDrive URL: {url}")
             response = requests.get(url, headers=headers, allow_redirects=True)
+            
+            print(f"[CV Fetch] Response: {response.status_code}")
             
             if response.status_code == 200:
                 return BytesIO(response.content), candidate.source_file_name
+            else:
+                print(f"[CV Fetch] Error: {response.text[:200]}")
         
         elif source == 'sharepoint':
-            # Source ID is the drive item ID (format: driveId:itemId)
             if ':' in source_id:
                 drive_id, item_id = source_id.split(':', 1)
                 url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/content"
             else:
                 url = f"https://graph.microsoft.com/v1.0/me/drive/items/{source_id}/content"
             
+            print(f"[CV Fetch] SharePoint URL: {url}")
             response = requests.get(url, headers=headers, allow_redirects=True)
+            
+            print(f"[CV Fetch] Response: {response.status_code}")
             
             if response.status_code == 200:
                 return BytesIO(response.content), candidate.source_file_name
+            else:
+                print(f"[CV Fetch] Error: {response.text[:200]}")
+        else:
+            print(f"[CV Fetch] Unknown source type: {source}")
     
     except Exception as e:
-        print(f"Error fetching CV from source: {e}")
+        print(f"[CV Fetch] Exception: {e}")
+    
+    return None, None
+
     
     return None, None
 
