@@ -41,10 +41,10 @@ def refresh_access_token(user_settings, db):
         app_msal = get_msal_app(user_settings)
         
         # Attempt to refresh the token - must use same scopes as initial auth
+        # Note: offline_access is automatically handled by MSAL
         result = app_msal.acquire_token_by_refresh_token(
             user_settings.ms_refresh_token,
             scopes=[
-                "offline_access",  # REQUIRED for refresh tokens!
                 "User.Read",
                 "Mail.Read",
                 "Mail.ReadWrite",

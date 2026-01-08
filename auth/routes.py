@@ -242,8 +242,8 @@ def test_clickup():
 
 
 # Microsoft OAuth Routes
+# Note: offline_access is automatically added by MSAL for device flow
 GRAPH_SCOPES = [
-    "offline_access",  # REQUIRED for refresh tokens to work!
     "User.Read",
     "Mail.Read", 
     "Mail.ReadWrite",  # For reading email attachments
