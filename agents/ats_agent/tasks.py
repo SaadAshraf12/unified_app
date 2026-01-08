@@ -206,8 +206,18 @@ def process_ats_scan(user_id):
                         }
                         candidate.final_weighted_score = calculate_weighted_score(score_result, weights)
                         
-                        # Update extracted data
-                        candidate.years_of_experience = score_result.get('years_of_experience')
+                        # Update extracted data - sanitize numeric fields
+                        yoe = score_result.get('years_of_experience')
+                        if isinstance(yoe, (int, float)):
+                            candidate.years_of_experience = yoe
+                        elif isinstance(yoe, str):
+                            # Try to extract number from string
+                            import re
+                            numbers = re.findall(r'[\d.]+', yoe)
+                            candidate.years_of_experience = float(numbers[0]) if numbers else None
+                        else:
+                            candidate.years_of_experience = None
+                        
                         candidate.location = score_result.get('location')
                         candidate.current_job_title = score_result.get('current_title')
                         candidate.skills = score_result.get('extracted_skills', [])
