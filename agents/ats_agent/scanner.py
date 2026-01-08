@@ -32,7 +32,7 @@ def scan_outlook_folder(access_token: str, folder_name: str = "Recruitment") -> 
             return []
         
         # Get messages with attachments
-        messages_url = f'https://graph.microsoft.com/v1.0/me/mailFolders/{folder_id}/messages?$filter=hasAttachments eq true&$top=50'
+        messages_url = f'https://graph.microsoft.com/v1.0/me/mailFolders/{folder_id}/messages?$filter=hasAttachments eq true&$orderby=receivedDateTime desc&$top=50'
         response = requests.get(messages_url, headers=headers)
         response.raise_for_status()
         messages = response.json().get('value', [])
@@ -180,10 +180,10 @@ def scan_email_attachments(access_token: str, folder_name: Optional[str] = None,
                 print(f"Folder '{folder_name}' not found")
                 return []
             
-            messages_url = f'https://graph.microsoft.com/v1.0/me/mailFolders/{folder_id}/messages?$filter=hasAttachments eq true&$top={max_emails}'
+            messages_url = f'https://graph.microsoft.com/v1.0/me/mailFolders/{folder_id}/messages?$filter=hasAttachments eq true&$orderby=receivedDateTime desc&$top={max_emails}'
         else:
             # Scan inbox
-            messages_url = f'https://graph.microsoft.com/v1.0/me/messages?$filter=hasAttachments eq true&$top={max_emails}'
+            messages_url = f'https://graph.microsoft.com/v1.0/me/messages?$filter=hasAttachments eq true&$orderby=receivedDateTime desc&$top={max_emails}'
         
         response = requests.get(messages_url, headers=headers)
         response.raise_for_status()
