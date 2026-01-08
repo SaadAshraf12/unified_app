@@ -31,14 +31,24 @@ def scan_outlook_folder(access_token: str, folder_name: str = "Recruitment") -> 
             print(f"Folder '{folder_name}' not found")
             return []
         
-        # Get messages with attachments
-        messages_url = f'https://graph.microsoft.com/v1.0/me/mailFolders/{folder_id}/messages?$filter=hasAttachments eq true&$orderby=receivedDateTime desc&$top=50'
+        # Get newest messages first (no filter to avoid API error, check hasAttachments in code)
+        messages_url = f'https://graph.microsoft.com/v1.0/me/mailFolders/{folder_id}/messages?$orderby=receivedDateTime desc&$top=100&$select=id,hasAttachments,receivedDateTime'
         response = requests.get(messages_url, headers=headers)
         response.raise_for_status()
         messages = response.json().get('value', [])
         
         cv_files = []
+        emails_processed = 0
+        
         for message in messages:
+            # Skip messages without attachments
+            if not message.get('hasAttachments'):
+                continue
+            
+            emails_processed += 1
+            if emails_processed > 50:
+                break
+            
             # Get attachments
             attachments_url = f"https://graph.microsoft.com/v1.0/me/messages/{message['id']}/attachments"
             att_response = requests.get(attachments_url, headers=headers)
@@ -55,6 +65,7 @@ def scan_outlook_folder(access_token: str, folder_name: str = "Recruitment") -> 
                         'source_id': f"{message['id']}_{att['id']}"
                     })
         
+        print(f"Found {len(cv_files)} CV files from {emails_processed} emails")
         return cv_files
         
     except Exception as e:
@@ -180,17 +191,28 @@ def scan_email_attachments(access_token: str, folder_name: Optional[str] = None,
                 print(f"Folder '{folder_name}' not found")
                 return []
             
-            messages_url = f'https://graph.microsoft.com/v1.0/me/mailFolders/{folder_id}/messages?$filter=hasAttachments eq true&$orderby=receivedDateTime desc&$top={max_emails}'
+            # Get newest emails first (fetch more to account for those without attachments)
+            messages_url = f'https://graph.microsoft.com/v1.0/me/mailFolders/{folder_id}/messages?$orderby=receivedDateTime desc&$top=100&$select=id,hasAttachments,receivedDateTime'
         else:
-            # Scan inbox
-            messages_url = f'https://graph.microsoft.com/v1.0/me/messages?$filter=hasAttachments eq true&$orderby=receivedDateTime desc&$top={max_emails}'
+            # Scan inbox - get newest emails first
+            messages_url = f'https://graph.microsoft.com/v1.0/me/messages?$orderby=receivedDateTime desc&$top=100&$select=id,hasAttachments,receivedDateTime'
         
         response = requests.get(messages_url, headers=headers)
         response.raise_for_status()
         messages = response.json().get('value', [])
         
         cv_files = []
+        emails_with_attachments = 0
+        
         for message in messages:
+            # Skip messages without attachments
+            if not message.get('hasAttachments'):
+                continue
+            
+            emails_with_attachments += 1
+            if emails_with_attachments > max_emails:
+                break
+            
             # Get attachments
             attachments_url = f"https://graph.microsoft.com/v1.0/me/messages/{message['id']}/attachments"
             att_response = requests.get(attachments_url, headers=headers)
@@ -208,6 +230,7 @@ def scan_email_attachments(access_token: str, folder_name: Optional[str] = None,
                         'source_id': f"{message['id']}_{att['id']}"
                     })
         
+        print(f"Found {len(cv_files)} CV files from {emails_with_attachments} emails with attachments")
         return cv_files
         
     except Exception as e:
