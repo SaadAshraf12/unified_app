@@ -205,22 +205,100 @@ def history():
     return render_template('ats/history.html', scans=scans)
 
 
+def _fetch_cv_from_source(candidate, access_token):
+    """Fetch CV file from original source (OneDrive, Email, SharePoint)."""
+    import requests
+    import base64
+    from io import BytesIO
+    
+    source = candidate.cv_source
+    source_id = candidate.source_file_id
+    
+    if not source_id or not access_token:
+        return None, None
+    
+    headers = {'Authorization': f'Bearer {access_token}'}
+    
+    try:
+        if source in ['email_inbox', 'email_folder']:
+            # Source ID format: message_id_attachment_id
+            parts = source_id.rsplit('_', 1)
+            if len(parts) != 2:
+                return None, None
+            message_id, attachment_id = parts
+            
+            # Fetch attachment from Graph API
+            url = f"https://graph.microsoft.com/v1.0/me/messages/{message_id}/attachments/{attachment_id}"
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                content_bytes = data.get('contentBytes')
+                if content_bytes:
+                    return BytesIO(base64.b64decode(content_bytes)), data.get('name')
+        
+        elif source == 'onedrive':
+            # Source ID is the item ID
+            url = f"https://graph.microsoft.com/v1.0/me/drive/items/{source_id}/content"
+            response = requests.get(url, headers=headers, allow_redirects=True)
+            
+            if response.status_code == 200:
+                return BytesIO(response.content), candidate.source_file_name
+        
+        elif source == 'sharepoint':
+            # Source ID is the drive item ID (format: driveId:itemId)
+            if ':' in source_id:
+                drive_id, item_id = source_id.split(':', 1)
+                url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/content"
+            else:
+                url = f"https://graph.microsoft.com/v1.0/me/drive/items/{source_id}/content"
+            
+            response = requests.get(url, headers=headers, allow_redirects=True)
+            
+            if response.status_code == 200:
+                return BytesIO(response.content), candidate.source_file_name
+    
+    except Exception as e:
+        print(f"Error fetching CV from source: {e}")
+    
+    return None, None
+
+
 @ats_bp.route('/candidate/<int:candidate_id>/view-cv')
 @login_required
 def view_cv(candidate_id):
-    """View the original CV file (opens in browser)."""
+    """View the original CV file (fetches from source dynamically)."""
+    from flask import Response
+    from utils.ms_auth import get_valid_access_token
+    from models import UserSettings
+    
     candidate = CVCandidate.query.get_or_404(candidate_id)
     
-    # Security check - ensure user owns this candidate
+    # Security check
     if candidate.user_id != current_user.id:
         abort(403)
     
-    if not candidate.cv_file_path or not os.path.exists(candidate.cv_file_path):
-        flash('CV file not found', 'error')
+    # Get access token
+    settings = UserSettings.query.filter_by(user_id=current_user.id).first()
+    if not settings:
+        flash('Microsoft account not connected', 'error')
         return redirect(url_for('ats.candidate_detail', candidate_id=candidate_id))
     
-    # Determine mimetype based on extension
-    ext = candidate.cv_file_path.rsplit('.', 1)[-1].lower()
+    access_token = get_valid_access_token(settings, db)
+    if not access_token:
+        flash('Microsoft token expired. Please re-authenticate.', 'error')
+        return redirect(url_for('auth.settings'))
+    
+    # Fetch CV from original source
+    file_data, filename = _fetch_cv_from_source(candidate, access_token)
+    
+    if not file_data:
+        flash('Could not fetch CV from source', 'error')
+        return redirect(url_for('ats.candidate_detail', candidate_id=candidate_id))
+    
+    # Determine mimetype
+    filename = filename or candidate.source_file_name or 'cv.pdf'
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'pdf'
     mimetypes = {
         'pdf': 'application/pdf',
         'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -228,32 +306,50 @@ def view_cv(candidate_id):
     }
     mimetype = mimetypes.get(ext, 'application/octet-stream')
     
-    return send_file(
-        candidate.cv_file_path,
+    return Response(
+        file_data.getvalue(),
         mimetype=mimetype,
-        as_attachment=False  # Display in browser
+        headers={'Content-Disposition': f'inline; filename="{filename}"'}
     )
 
 
 @ats_bp.route('/candidate/<int:candidate_id>/download-cv')
 @login_required
 def download_cv(candidate_id):
-    """Download the original CV file."""
+    """Download the original CV file (fetches from source dynamically)."""
+    from flask import Response
+    from utils.ms_auth import get_valid_access_token
+    from models import UserSettings
+    
     candidate = CVCandidate.query.get_or_404(candidate_id)
     
     # Security check
     if candidate.user_id != current_user.id:
         abort(403)
     
-    if not candidate.cv_file_path or not os.path.exists(candidate.cv_file_path):
-        flash('CV file not found', 'error')
+    # Get access token
+    settings = UserSettings.query.filter_by(user_id=current_user.id).first()
+    if not settings:
+        flash('Microsoft account not connected', 'error')
         return redirect(url_for('ats.candidate_detail', candidate_id=candidate_id))
     
-    # Get original filename or create one
-    download_name = candidate.source_file_name or f"CV_{candidate.full_name or candidate_id}.pdf"
+    access_token = get_valid_access_token(settings, db)
+    if not access_token:
+        flash('Microsoft token expired. Please re-authenticate.', 'error')
+        return redirect(url_for('auth.settings'))
     
-    return send_file(
-        candidate.cv_file_path,
-        as_attachment=True,
-        download_name=download_name
+    # Fetch CV from original source
+    file_data, filename = _fetch_cv_from_source(candidate, access_token)
+    
+    if not file_data:
+        flash('Could not fetch CV from source', 'error')
+        return redirect(url_for('ats.candidate_detail', candidate_id=candidate_id))
+    
+    # Use original filename
+    download_name = filename or candidate.source_file_name or f"CV_{candidate.full_name or candidate_id}.pdf"
+    
+    return Response(
+        file_data.getvalue(),
+        mimetype='application/octet-stream',
+        headers={'Content-Disposition': f'attachment; filename="{download_name}"'}
     )
