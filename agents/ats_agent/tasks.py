@@ -123,6 +123,9 @@ def process_ats_scan(user_id):
                 if not cv_text:
                     continue
                 
+                # Sanitize CV text - remove NUL bytes that PostgreSQL doesn't accept
+                cv_text = cv_text.replace('\x00', '').replace('\0', '')
+                
                 basic_info = parse_cv_basic_info(cv_text)
                 
                 # Skip if candidate with same email already exists (deduplication)
@@ -227,7 +230,15 @@ def process_ats_scan(user_id):
             print(f"ATS scan completed for user {user_id}: {scored} scored, {filtered} filtered")
             
         except Exception as e:
-            scan.status = 'failed'
-            scan.error_message = str(e)
-            db.session.commit()
+            # Rollback any pending transaction first
+            db.session.rollback()
+            
+            # Now update the scan status
+            try:
+                scan.status = 'failed'
+                scan.error_message = str(e)[:500]  # Limit error message length
+                db.session.commit()
+            except:
+                db.session.rollback()
+            
             print(f"ATS scan failed for user {user_id}: {e}")
